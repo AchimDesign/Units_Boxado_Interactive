@@ -198,7 +198,7 @@ var IC = {
 
 // Mesh name → tooltip config
 var MESH_MAP = {
-  'leftWall': {
+  'LeftWall': {
     name: 'Ściana boczna (lewa)',
     section: 'WYMIARY ZEWNĘTRZNE',
     rows: [
@@ -206,7 +206,7 @@ var MESH_MAP = {
       { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
     ]
   },
-  'rightWall': {
+  'RightWall': {
     name: 'Ściana boczna (prawa)',
     section: 'WYMIARY ZEWNĘTRZNE',
     rows: [
@@ -214,7 +214,7 @@ var MESH_MAP = {
       { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
     ]
   },
-  'backWall': {
+  'Back': {
     name: 'Ściana tylna',
     section: 'WYMIARY ZEWNĘTRZNE',
     rows: [
@@ -222,7 +222,7 @@ var MESH_MAP = {
       { icon: IC.moveV, label: 'Wysokość', value: DIMS.height },
     ]
   },
-  'roof': {
+  'Roof': {
     name: 'Dach',
     section: 'WYMIARY ZEWNĘTRZNE',
     rows: [
@@ -230,7 +230,7 @@ var MESH_MAP = {
       { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
     ]
   },
-  'floor': {
+  'Floor': {
     name: 'Podłoga',
     section: 'WYMIARY ZEWNĘTRZNE',
     rows: [
@@ -238,48 +238,12 @@ var MESH_MAP = {
       { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
     ]
   },
-  'floor.001': {
-    name: 'Podłoga',
-    section: 'WYMIARY ZEWNĘTRZNE',
-    rows: [
-      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
-      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
-    ]
-  },
-  'Doors': {
+  'FrontFace': {
     name: 'Drzwi',
     section: 'WYMIARY DRZWI',
     rows: [
       { icon: IC.moveH, label: 'Szer. w świetle drzwi', value: DIMS.doorW },
       { icon: IC.moveV, label: 'Wys. w świetle drzwi', value: DIMS.doorH },
-    ]
-  },
-  'doorSill': {
-    name: 'Próg',
-    section: 'WYMIARY DRZWI',
-    rows: [
-      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
-    ]
-  },
-  'gutter': {
-    name: 'Rynna',
-    section: 'WYMIARY ZEWNĘTRZNE',
-    rows: [
-      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
-    ]
-  },
-  'frontRim': {
-    name: 'Obramowanie przednie',
-    section: 'WYMIARY ZEWNĘTRZNE',
-    rows: [
-      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
-    ]
-  },
-  'backRim': {
-    name: 'Obramowanie tylne',
-    section: 'WYMIARY ZEWNĘTRZNE',
-    rows: [
-      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
     ]
   },
 };
@@ -456,7 +420,7 @@ function updateRaycast() {
     hoveredMesh = newHovered;
   }
 
-  cv.style.cursor = newHovered ? 'crosshair' : 'grab';
+  cv.style.cursor = newHovered ? 'crosshair' : 'default';
 }
 
 function highlightMesh(mesh) {
@@ -519,20 +483,46 @@ cv.addEventListener('mousemove', onMouseMove);
 cv.addEventListener('mouseleave', function() {
   hideTooltip();
   if (hoveredMesh) { unhighlightMesh(hoveredMesh); hoveredMesh = null; }
-  cv.style.cursor = 'grab';
+  cv.style.cursor = 'default';
 });
 
+var mouseDown = false;
+var dragStartX = 0, dragStartY = 0;
+var DRAG_THRESHOLD = 3;
+
 cv.addEventListener('mousedown', function(e) {
-  drag = true; lx = e.clientX; ly = e.clientY;
-  cv.style.cursor = 'grabbing';
-  hideTooltip();
+  mouseDown = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  lx = e.clientX; ly = e.clientY;
 });
 window.addEventListener('mouseup', function() {
-  drag = false;
-  cv.style.cursor = hoveredMesh ? 'crosshair' : 'grab';
+  mouseDown = false;
+  if (drag) {
+    drag = false;
+    // Small delay so raycast picks up after drag ends
+    setTimeout(function() {
+      cv.style.cursor = hoveredMesh ? 'crosshair' : 'default';
+    }, 50);
+  }
 });
 window.addEventListener('mousemove', function(e) {
-  if (!drag) return;
+  if (!mouseDown) return;
+
+  // Check if we've moved enough to count as drag
+  if (!drag) {
+    var dx = e.clientX - dragStartX;
+    var dy = e.clientY - dragStartY;
+    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+      drag = true;
+      cv.style.cursor = 'grabbing';
+      hideTooltip();
+      if (hoveredMesh) { unhighlightMesh(hoveredMesh); hoveredMesh = null; }
+    } else {
+      return;
+    }
+  }
+
   tTheta -= (e.clientX - lx) * 0.008;
   tPhi = Math.max(0.05, Math.min(Math.PI * 0.49, tPhi - (e.clientY - ly) * 0.007));
   lx = e.clientX; ly = e.clientY;
