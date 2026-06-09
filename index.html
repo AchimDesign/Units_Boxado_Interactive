@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxado — Interactive 3D Test</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --brand: #E73F19;
+    --brand-soft: #FEE9E1;
+    --black: #1D1D1B;
+    --white: #FFFFFF;
+    --g10: #F2F2F2;
+    --g50: #9A9A9A;
+    --g70: #6B6B6B;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:'Plus Jakarta Sans',-apple-system,system-ui,sans-serif;
+    background: var(--g10);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .viewer {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Tooltip */
+  .tooltip-3d {
+    position: fixed;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    transform: translate(16px, -50%);
+  }
+  .tooltip-3d.visible { opacity: 1; }
+
+  .tooltip-card {
+    background: var(--black);
+    border-radius: 12px;
+    padding: 14px 18px;
+    min-width: 220px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+  }
+
+  .tooltip-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--g50);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  .tooltip-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 4px 0;
+  }
+  .tooltip-row + .tooltip-row { border-top: 1px solid rgba(255,255,255,0.06); }
+
+  .tooltip-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--white);
+  }
+
+  .tooltip-icon {
+    color: var(--brand);
+    font-size: 14px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  .tooltip-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.7);
+    white-space: nowrap;
+  }
+
+  /* Part name label */
+  .tooltip-part-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--brand);
+    margin-bottom: 6px;
+  }
+
+  /* Loader */
+  .loader-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--g10);
+    z-index: 50;
+    transition: opacity 0.35s ease;
+  }
+  .loader-overlay.hidden { opacity:0; pointer-events:none; }
+  .loader-overlay img { width:48px; height:48px; }
+  .loader-overlay span { font-size:12px; color:var(--g70); font-weight:500; }
+
+  /* Info badge */
+  .info-badge {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    background: var(--black);
+    color: var(--white);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .info-badge .dot { width:6px; height:6px; border-radius:50%; background:var(--brand); }
+</style>
+
+<script async src="https://ga.jspm.io/npm:es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+    "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.128.0/examples/jsm/loaders/GLTFLoader.js",
+    "three/examples/jsm/loaders/EXRLoader.js": "https://unpkg.com/three@0.128.0/examples/jsm/loaders/EXRLoader.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<div class="viewer" id="viewer">
+  <canvas id="cv"></canvas>
+  <div class="loader-overlay" id="loader">
+    <img src="LoopedSquirrelRun.gif" alt="Loading">
+    <span>Ładowanie modelu…</span>
+  </div>
+  <div class="info-badge"><span class="dot"></span> Najedź na element boxa</div>
+</div>
+
+<div class="tooltip-3d" id="tooltip">
+  <div class="tooltip-card">
+    <div class="tooltip-part-name" id="ttPartName"></div>
+    <div class="tooltip-section-title" id="ttSectionTitle"></div>
+    <div id="ttRows"></div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { EXRLoader } from "three/examples/jsm/loaders/EXRLoader.js";
+
+// ═══ Config ═══
+
+var BRAND_COLOR = new THREE.Color(0xE73F19);
+var HIGHLIGHT_INTENSITY = 0.4;
+
+// 3M dimensions
+var DIMS = {
+  length: 1675,   // głębokość zewn.
+  width: 2290,    // szerokość zewn.
+  height: 2246,   // wysokość zewn.
+  doorW: 2130,    // szer. w świetle drzwi
+  doorH: 2015,    // wys. w świetle drzwi
+};
+
+// SVG icons for tooltip
+var IC = {
+  moveH: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M1 8h14M1 8l3-3M1 8l3 3M15 8l-3-3M15 8l-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  moveV: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v14M8 1L5 4M8 1l3 3M8 15l-3-3M8 15l3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  moveD: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 14L14 2M14 2H6M14 2v8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+
+// Mesh name → tooltip config
+var MESH_MAP = {
+  'leftWall': {
+    name: 'Ściana boczna (lewa)',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveV, label: 'Wysokość', value: DIMS.height },
+      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
+    ]
+  },
+  'rightWall': {
+    name: 'Ściana boczna (prawa)',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveV, label: 'Wysokość', value: DIMS.height },
+      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
+    ]
+  },
+  'backWall': {
+    name: 'Ściana tylna',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+      { icon: IC.moveV, label: 'Wysokość', value: DIMS.height },
+    ]
+  },
+  'roof': {
+    name: 'Dach',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
+    ]
+  },
+  'floor': {
+    name: 'Podłoga',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
+    ]
+  },
+  'floor.001': {
+    name: 'Podłoga',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
+    ]
+  },
+  'Doors': {
+    name: 'Drzwi',
+    section: 'WYMIARY DRZWI',
+    rows: [
+      { icon: IC.moveH, label: 'Szer. w świetle drzwi', value: DIMS.doorW },
+      { icon: IC.moveV, label: 'Wys. w świetle drzwi', value: DIMS.doorH },
+    ]
+  },
+  'doorSill': {
+    name: 'Próg',
+    section: 'WYMIARY DRZWI',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+    ]
+  },
+  'gutter': {
+    name: 'Rynna',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveD, label: 'Głębokość', value: DIMS.length },
+    ]
+  },
+  'frontRim': {
+    name: 'Obramowanie przednie',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+    ]
+  },
+  'backRim': {
+    name: 'Obramowanie tylne',
+    section: 'WYMIARY ZEWNĘTRZNE',
+    rows: [
+      { icon: IC.moveH, label: 'Szerokość', value: DIMS.width },
+    ]
+  },
+};
+
+// ═══ Three.js Setup ═══
+
+var cv = document.getElementById('cv');
+var wrap = document.getElementById('viewer');
+var tooltipEl = document.getElementById('tooltip');
+var ttPartName = document.getElementById('ttPartName');
+var ttSectionTitle = document.getElementById('ttSectionTitle');
+var ttRows = document.getElementById('ttRows');
+
+var renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+renderer.setClearColor(0xe2e2e2, 1);
+renderer.physicallyCorrectLights = true;
+
+var scene = new THREE.Scene();
+var camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+// HDR env
+var pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+
+var envReady = false;
+
+new EXRLoader().load('autumn_hill_view_1k.exr', function(texture) {
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  var envMap = pmremGenerator.fromEquirectangular(texture).texture;
+  scene.environment = envMap;
+  texture.dispose();
+  pmremGenerator.dispose();
+  envReady = true;
+  checkReady();
+});
+
+// Lights (supplement HDR)
+scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+var keyLight = new THREE.DirectionalLight(0xfff8f2, 1.2);
+keyLight.position.set(5, 9, 6);
+scene.add(keyLight);
+var fillLight = new THREE.DirectionalLight(0xe8f0ff, 0.3);
+fillLight.position.set(-5, 3, -3);
+scene.add(fillLight);
+
+// Camera orbit
+var theta = 0.5, phi = 0.85, tTheta = 0.5, tPhi = 0.85;
+var radius = 8, tRadius = 8;
+var modelCenter = new THREE.Vector3(0, -0.12, 0);
+var drag = false, lx = 0, ly = 0, pinchDist = null;
+
+// ═══ Load Model ═══
+
+var currentModel = null;
+var modelReady = false;
+var interactiveMeshes = []; // flat list of all named meshes
+var originalMaterials = new Map(); // mesh → original material
+
+var loader = new GLTFLoader();
+loader.load('3M_Interactive.glb', function(gltf) {
+  var model = gltf.scene;
+  var box = new THREE.Box3().setFromObject(model);
+  var center = box.getCenter(new THREE.Vector3());
+  var size = box.getSize(new THREE.Vector3());
+  model.position.sub(center);
+
+  // Collect interactive meshes
+  model.traverse(function(child) {
+    if (child.isMesh) {
+      // Find root-level name (walk up to scene)
+      var nameNode = child;
+      while (nameNode.parent && nameNode.parent !== model) {
+        nameNode = nameNode.parent;
+      }
+      var meshName = nameNode.name || child.name;
+
+      if (MESH_MAP[meshName]) {
+        child.userData.partName = meshName;
+        interactiveMeshes.push(child);
+        // Store original material (clone to avoid shared refs)
+        originalMaterials.set(child, child.material.clone());
+      }
+    }
+  });
+
+  scene.add(model);
+  currentModel = model;
+
+  var maxDim = Math.max(size.x, size.y, size.z);
+  var fov = camera.fov * (Math.PI / 180);
+  var fit = (maxDim / 2) / Math.tan(fov / 2) * 1.6;
+  tRadius = fit;
+  radius = fit;
+
+  modelReady = true;
+  checkReady();
+}, undefined, function(err) {
+  console.error('GLB error:', err);
+});
+
+function checkReady() {
+  if (modelReady && envReady) {
+    renderer.render(scene, camera);
+    document.getElementById('loader').classList.add('hidden');
+  }
+}
+
+// ═══ Raycasting ═══
+
+var raycaster = new THREE.Raycaster();
+var mouse = new THREE.Vector2();
+var hoveredMesh = null;
+
+function onMouseMove(e) {
+  var rect = cv.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+  // Position tooltip
+  tooltipEl.style.left = e.clientX + 'px';
+  tooltipEl.style.top = e.clientY + 'px';
+
+  // Keep tooltip inside viewport
+  var ttRect = tooltipEl.getBoundingClientRect();
+  if (e.clientX + ttRect.width + 20 > window.innerWidth) {
+    tooltipEl.style.transform = 'translate(-' + (ttRect.width + 16) + 'px, -50%)';
+  } else {
+    tooltipEl.style.transform = 'translate(16px, -50%)';
+  }
+}
+
+function updateRaycast() {
+  if (!currentModel || drag) return;
+
+  raycaster.setFromCamera(mouse, camera);
+  var intersects = raycaster.intersectObjects(interactiveMeshes, false);
+
+  var newHovered = null;
+  if (intersects.length > 0) {
+    newHovered = intersects[0].object;
+  }
+
+  if (newHovered !== hoveredMesh) {
+    // Unhighlight previous
+    if (hoveredMesh) {
+      unhighlightMesh(hoveredMesh);
+    }
+    // Highlight new
+    if (newHovered) {
+      highlightMesh(newHovered);
+      showTooltip(newHovered.userData.partName);
+    } else {
+      hideTooltip();
+    }
+    hoveredMesh = newHovered;
+  }
+
+  cv.style.cursor = newHovered ? 'crosshair' : 'grab';
+}
+
+function highlightMesh(mesh) {
+  // Find all meshes with the same partName and highlight them
+  var partName = mesh.userData.partName;
+  interactiveMeshes.forEach(function(m) {
+    if (m.userData.partName === partName) {
+      var mat = m.material;
+      if (!mat._originalEmissive) {
+        mat._originalEmissive = mat.emissive ? mat.emissive.clone() : new THREE.Color(0, 0, 0);
+        mat._originalEmissiveIntensity = mat.emissiveIntensity || 0;
+      }
+      mat.emissive = BRAND_COLOR.clone();
+      mat.emissiveIntensity = HIGHLIGHT_INTENSITY;
+    }
+  });
+}
+
+function unhighlightMesh(mesh) {
+  var partName = mesh.userData.partName;
+  interactiveMeshes.forEach(function(m) {
+    if (m.userData.partName === partName) {
+      var mat = m.material;
+      if (mat._originalEmissive) {
+        mat.emissive = mat._originalEmissive;
+        mat.emissiveIntensity = mat._originalEmissiveIntensity;
+        delete mat._originalEmissive;
+        delete mat._originalEmissiveIntensity;
+      }
+    }
+  });
+}
+
+function showTooltip(partName) {
+  var config = MESH_MAP[partName];
+  if (!config) return;
+
+  ttPartName.textContent = config.name;
+  ttSectionTitle.textContent = config.section;
+
+  var html = '';
+  config.rows.forEach(function(r) {
+    html += '<div class="tooltip-row">';
+    html += '<span class="tooltip-label"><span class="tooltip-icon">' + r.icon + '</span>' + r.label + '</span>';
+    html += '<span class="tooltip-value">' + r.value + ' mm</span>';
+    html += '</div>';
+  });
+  ttRows.innerHTML = html;
+
+  tooltipEl.classList.add('visible');
+}
+
+function hideTooltip() {
+  tooltipEl.classList.remove('visible');
+}
+
+// ═══ Input ═══
+
+cv.addEventListener('mousemove', onMouseMove);
+cv.addEventListener('mouseleave', function() {
+  hideTooltip();
+  if (hoveredMesh) { unhighlightMesh(hoveredMesh); hoveredMesh = null; }
+  cv.style.cursor = 'grab';
+});
+
+cv.addEventListener('mousedown', function(e) {
+  drag = true; lx = e.clientX; ly = e.clientY;
+  cv.style.cursor = 'grabbing';
+  hideTooltip();
+});
+window.addEventListener('mouseup', function() {
+  drag = false;
+  cv.style.cursor = hoveredMesh ? 'crosshair' : 'grab';
+});
+window.addEventListener('mousemove', function(e) {
+  if (!drag) return;
+  tTheta -= (e.clientX - lx) * 0.008;
+  tPhi = Math.max(0.05, Math.min(Math.PI * 0.49, tPhi - (e.clientY - ly) * 0.007));
+  lx = e.clientX; ly = e.clientY;
+});
+cv.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  var maxR = Math.max(30, tRadius * 2);
+  tRadius = Math.max(0.5, Math.min(maxR, tRadius + e.deltaY * 0.015));
+}, { passive: false });
+
+// Touch
+cv.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 1) { drag = true; lx = e.touches[0].clientX; ly = e.touches[0].clientY; }
+  else if (e.touches.length === 2) {
+    drag = false;
+    var dx = e.touches[0].clientX - e.touches[1].clientX;
+    var dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchDist = Math.hypot(dx, dy);
+  }
+}, { passive: false });
+window.addEventListener('touchend', function(e) {
+  if (e.touches.length < 2) pinchDist = null;
+  if (e.touches.length === 0) drag = false;
+});
+cv.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 2) {
+    var dx = e.touches[0].clientX - e.touches[1].clientX;
+    var dy = e.touches[0].clientY - e.touches[1].clientY;
+    var dist = Math.hypot(dx, dy);
+    if (pinchDist !== null) { var maxR2 = Math.max(30, tRadius * 2); tRadius = Math.max(0.5, Math.min(maxR2, tRadius - (dist - pinchDist) * 0.02)); }
+    pinchDist = dist; drag = false;
+  } else if (e.touches.length === 1 && drag) {
+    tTheta -= (e.touches[0].clientX - lx) * 0.008;
+    tPhi = Math.max(0.05, Math.min(Math.PI * 0.49, tPhi - (e.touches[0].clientY - ly) * 0.007));
+    lx = e.touches[0].clientX; ly = e.touches[0].clientY;
+  }
+}, { passive: false });
+
+// ═══ Resize ═══
+
+function resize() {
+  var w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ═══ Render Loop ═══
+
+(function frame() {
+  requestAnimationFrame(frame);
+
+  theta += (tTheta - theta) * 0.1;
+  phi += (tPhi - phi) * 0.1;
+  radius += (tRadius - radius) * 0.1;
+
+  var ex = modelCenter.x + radius * Math.sin(phi) * Math.sin(theta);
+  var ey = modelCenter.y + radius * Math.cos(phi);
+  var ez = modelCenter.z + radius * Math.sin(phi) * Math.cos(theta);
+  camera.position.set(ex, ey, ez);
+  camera.lookAt(modelCenter);
+
+  updateRaycast();
+  renderer.render(scene, camera);
+})();
+
+</script>
+</body>
+</html>
