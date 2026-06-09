@@ -350,24 +350,39 @@ loader.load('3M_Interactive.glb', function(gltf) {
   var size = box.getSize(new THREE.Vector3());
   model.position.sub(center);
 
-  // Collect interactive meshes
+  // Collect interactive meshes — check all ancestors for matching name
+  console.log('--- GLB mesh structure ---');
   model.traverse(function(child) {
     if (child.isMesh) {
-      // Find root-level name (walk up to scene)
-      var nameNode = child;
-      while (nameNode.parent && nameNode.parent !== model) {
-        nameNode = nameNode.parent;
+      // Walk up hierarchy to find any ancestor with a name in MESH_MAP
+      var matchedName = null;
+      var node = child;
+      var path = [child.name];
+      while (node) {
+        if (node.name && MESH_MAP[node.name]) {
+          matchedName = node.name;
+          break;
+        }
+        node = node.parent;
+        if (node && node.name) path.push(node.name);
       }
-      var meshName = nameNode.name || child.name;
 
-      if (MESH_MAP[meshName]) {
-        child.userData.partName = meshName;
+      // Also check the mesh's own name
+      if (!matchedName && child.name && MESH_MAP[child.name]) {
+        matchedName = child.name;
+      }
+
+      console.log('Mesh:', child.name, '| Path:', path.reverse().join(' > '), '| Match:', matchedName || 'NONE');
+
+      if (matchedName) {
+        child.userData.partName = matchedName;
         interactiveMeshes.push(child);
-        // Store original material (clone to avoid shared refs)
         originalMaterials.set(child, child.material.clone());
       }
     }
   });
+  console.log('Interactive meshes found:', interactiveMeshes.length);
+  console.log('Names:', interactiveMeshes.map(function(m){ return m.userData.partName; }));
 
   scene.add(model);
   currentModel = model;
